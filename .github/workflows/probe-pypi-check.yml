@@ -1,0 +1,30 @@
+name: probe pypi existence check
+on:
+  push:
+    branches: [probe-pypi-check]
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        attempt: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: nanopb
+          fetch-depth: "0"
+      - name: Compute VERSION exactly as poetry_build.sh and pypi_publish.yml do
+        run: |
+          cd nanopb/extra/poetry
+          mkdir -p build && cp pyproject.toml build/
+          (cd build && sed -i -e 's/\(version =.*\)-dev.*/\1-dev'$(git rev-list HEAD --count)'"/' pyproject.toml)
+          VERSION=$(grep "^version =" build/pyproject.toml | cut -d '"' -f 2)
+          echo "VERSION=$VERSION" | tee -a $GITHUB_ENV
+      - name: Probe each version with the current (HTML) and proposed (JSON API) check
+        run: |
+          for V in "$VERSION" 1.0.0-dev1528 9.9.9; do
+            if curl --head --silent --fail -o /dev/null https://pypi.org/project/nanopb/$V/; then old=true; else old=false; fi
+            if curl --head --silent --fail -o /dev/null https://pypi.org/pypi/nanopb/$V/json; then new=true; else new=false; fi
+            code=$(curl --head --silent -o /dev/null -w '%{http_code}' https://pypi.org/project/nanopb/$V/)
+            echo "version=$V html_page_status=$code current_check_pypi_exists=$old json_api_pypi_exists=$new"
+          done
